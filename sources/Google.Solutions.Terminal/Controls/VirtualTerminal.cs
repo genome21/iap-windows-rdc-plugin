@@ -716,14 +716,22 @@ namespace Google.Solutions.Terminal.Controls
 
         private bool terminalWindowDestructionBegun = false;
         private bool ignoreWmCharBecauseOfAccelerator = false;
-        private string? selectionToCopyInKeyUp = null;
         private WindowMessage? currentSubclassedMessage;
 
         private void TerminalSubclassWndProc(ref Message m)
         {
             bool IsAcceleratorForCopyingCurrentSelection(Keys key)
             {
-                if (ModifierKeys == Keys.None && key == Keys.Enter)
+                //
+                // Ctrl+Shift+C is unlikely to cause collisions, so
+                // it's always active. Most other combinations might
+                // collide, so they're configurable.
+                //
+                if (ModifierKeys == (Keys.Control | Keys.Shift) && key == Keys.C)
+                {
+                    return true;
+                }
+                else if (ModifierKeys == Keys.None && key == Keys.Enter)
                 {
                     //
                     // Consistent with the classic Windows console, treat
@@ -751,7 +759,16 @@ namespace Google.Solutions.Terminal.Controls
 
             bool IsAcceleratorForPasting(Keys key)
             {
-                if (ModifierKeys == Keys.Shift && key == Keys.Insert)
+                //
+                // Ctrl+Shift+V is unlikely to cause collisions, so
+                // it's always active. All other combinations might
+                // collide, so they're configurable.
+                //
+                if (ModifierKeys == (Keys.Control | Keys.Shift) && key == Keys.V)
+                {
+                    return true;
+                }
+                else if (ModifierKeys == Keys.Shift && key == Keys.Insert)
                 {
                     return this.EnableShiftInsert;
                 }
@@ -911,23 +928,48 @@ namespace Google.Solutions.Terminal.Controls
                             NativeMethods.TerminalIsSelectionActive(terminalHandle))
                         {
                             //
-                            // Begin "copy" operation.
+                            // Copy selection to clipboard.
                             //
-                            // Cache the selected text so that we can process it
-                            // in WM_KEYUP.
+                            // NB. Instead of performing the operation in WM_KEYUP, we perform
+                            //     it here and then ignore the corresponding WM_KEYUP message.
+                            //     This is because depending on the order in which the user releases
+                            //     the key and modifier key, the corresponding key-up event may
+                            //     be delivered as two separate WM_KEYUP messages (one for
+                            //     Control, one for the character).
                             //
-                            // NB. We must not pass this key event to the terminal.
+                            var selection = NativeMethods.TerminalGetSelection(terminalHandle);
+                            if (!string.IsNullOrWhiteSpace(selection))
+                            {
+                                ClipboardUtil.SetText(selection);
+                            }
+
+                            NativeMethods.TerminalClearSelection(terminalHandle);
+
+                            //
+                            // Ignore the subsequent WM_CHAR.
                             //
                             this.ignoreWmCharBecauseOfAccelerator = true;
-                            this.selectionToCopyInKeyUp =
-                                NativeMethods.TerminalGetSelection(terminalHandle);
                         }
                         else if (IsAcceleratorForPasting((Keys)keyParams.VirtualKey))
                         {
                             //
-                            // We'll handle the paste in WM_KEYUP.
+                            // Paste clipboard contents.
                             //
-                            // NB. We must not pass this key event to the terminal.
+                            // NB. Instead of performing the operation in WM_KEYUP, we perform
+                            //     it here and then ignore the corresponding WM_KEYUP message.
+                            //     This is because depending on the order in which the user releases
+                            //     the key and modifier key, the corresponding key-up event may
+                            //     be delivered as two separate WM_KEYUP messages (one for
+                            //     Control, one for the character).
+                            //
+                            var contents = ClipboardUtil.GetText();
+                            if (!string.IsNullOrWhiteSpace(contents))
+                            {
+                                OnUserInput(SanitizeTextForPasting(contents));
+                            }
+
+                            //
+                            // Ignore the subsequent WM_CHAR.
                             //
                             this.ignoreWmCharBecauseOfAccelerator = true;
                         }
@@ -965,50 +1007,8 @@ namespace Google.Solutions.Terminal.Controls
                     {
                         var keyParams = new WmKeyUpDownParams(m);
 
-                        if (IsAcceleratorForCopyingCurrentSelection((Keys)keyParams.VirtualKey) &&
-                            this.selectionToCopyInKeyUp != null)
-                        {
-                            //
-                            // Continue the "copy" operation begun in WM_KEYDOWN.
-                            //
-                            // NB. We must not pass this key event to the
-                            // terminal.
-                            //
-                            try
-                            {
-                                if (!string.IsNullOrWhiteSpace(this.selectionToCopyInKeyUp))
-                                {
-                                    ClipboardUtil.SetText(this.selectionToCopyInKeyUp);
-                                }
-                            }
-                            catch (ExternalException)
-                            {
-                                //
-                                // Clipboard busy, ignore.
-                                //
-                            }
-
-                            NativeMethods.TerminalClearSelection(terminalHandle);
-                            this.selectionToCopyInKeyUp = null;
-                        }
-                        else if (IsAcceleratorForPasting((Keys)keyParams.VirtualKey))
-                        {
-                            try
-                            {
-                                var contents = Clipboard.GetText();
-                                if (!string.IsNullOrWhiteSpace(contents))
-                                {
-                                    OnUserInput(SanitizeTextForPasting(contents));
-                                }
-                            }
-                            catch (ExternalException)
-                            {
-                                //
-                                // Clipboard busy, ignore.
-                                //
-                            }
-                        }
-                        else if (
+                        if (IsAcceleratorForCopyingCurrentSelection((Keys)keyParams.VirtualKey) ||
+                            IsAcceleratorForPasting((Keys)keyParams.VirtualKey) ||
                             IsAcceleratorForScrollingToTop((Keys)keyParams.VirtualKey) ||
                             IsAcceleratorForScrollingToBottom((Keys)keyParams.VirtualKey) ||
                             IsAcceleratorForScrollingUpOnePage((Keys)keyParams.VirtualKey) ||

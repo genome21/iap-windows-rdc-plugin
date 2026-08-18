@@ -38,7 +38,7 @@ process is running, do the following:
 ### Check local policies
 
 If your local computer is managed by an organization, it's possible that your organization
-has [applied a policy that disables copy/paste for RDP :octicons-link-external-16:](https://learn.microsoft.com/en-us/azure/virtual-desktop/configure-device-redirections#disable-redirection-on-the-local-device).
+has [applied a policy that disables copy/paste for RDP :octicons-link-external-16:](https://gpsearch.azurewebsites.net/default.aspx?policyid=2508).
 To check if this is the case, do the following:
 
 1.  On your local computer, right-click the **Start** button and select **Windows PowerShell**.
@@ -65,7 +65,7 @@ To check if this is the case, do the following:
 ### Check remote policies
 
 If the remote VM is managed by an organization, it's possible that your organization
-has [applied a policy that disables copy/paste for RDP :octicons-link-external-16:](https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_CLIENT_CLIPBOARD).
+has [applied a policy that disables copy/paste for RDP :octicons-link-external-16:](https://gpsearch.azurewebsites.net/default.aspx?policyid=2508).
 To check if this is the case, do the following:
 
 
@@ -100,32 +100,69 @@ by using the **Type clipboard text** command:
 The **Type clipboard text** command simulates keyboard input and only supports characters supported
 by your current keyboard layout. Unsupported characters are replaced with `?`.
     
-## :material-message-alert: "Your credentials did not work" when using saved credentials
+## :material-message-alert: "Your credentials did not work", on first attempt only
 
-**Symptom**: You've configured valid credentials, but each time you try to connect to a VM, the _Your credentials did not work_ dialog appears. 
+**Symptom**: You've configured valid credentials, but each time you try to connect to a VM, the following error
+appears:
+
+> Your credentials did not work
+
 After re-entering the same credentials again, the connection succeeds.
 
 This issue can be the intentional effect of the
-[Always prompt for password upon connection :octicons-link-external-16:](https://admx.help/?Category=Windows_10_2016&Policy=Microsoft.Policies.TerminalServer::TS_PASSWORD) 
+[Always prompt for password upon connection :octicons-link-external-16:](https://gpsearch.azurewebsites.net/default.aspx?policyid=2471&lang=en-US#2471) 
 group policy setting. This policy is configured by default on [CIS hardened images :octicons-link-external-16:](https://www.cisecurity.org/cis-hardened-images/google/).
 
 To mitigate this issue,  [disable automatic logons](toolwindow-connection-settings.md#remote-desktop-security-settings) in
 the VM's connection settings
 
-## :material-message-alert: "Your credentials did not work"
+## :material-message-alert: "Your credentials did not work", permanently
 
-**Symptom**: You've configured valid credentials, but each time you try to connect to a VM, the _Your credentials did not work_ 
-dialog appears. Re-entering the credentials does not solve the issue.
+**Symptom**: You've configured valid credentials, but each time you try to connect to a VM, the following error
+appears:
+
+> Your credentials did not work
+
+Re-entering the credentials does not solve the issue.
 
 This behavior can occur if the [LAN Manager authentication level :octicons-link-external-16:](https://docs.microsoft.com/en-us/windows/security/threat-protection/security-policy-settings/network-security-lan-manager-authentication-level) of your local workstation and the VM are incompatible.
 
-Because of the way IAP Desktop tunnels RDP connections, it always uses NTLM for authentication and can't use Kerberos. 
+IAP Desktop tunnels RDP connections over IAP-TCP forwarding, which is incompatible with Kerberos. IAP Desktop therefore
+uses NTLM to perform network-level authentication (NLA) to the remote Windows VM.
+
 Depending on the LAN Manager authentication level configured on both machines, authentication will either use NTLM or NTLMv2.
 If you've configured the VM to demand NTLMv2 (authentication level `5`), but your local workstation uses level `1`, `2`, or `3`, protocol 
 negotiation fails and your credentials are rejected.
 
 To solve this issue, make sure that the LAN Manager authentication level on both machines is compatible.
 
+
+## :material-message-alert: "An authentication error has occurred"
+
+**Symptom**: You've entered valid credentials, but connecting to a VM fails with an error message similar to
+the following:
+
+> An authentication error has occurred. The function requested is not supported.
+
+The most likely reason for this error is that your Active Directory domain restricts the use of NTLM authentication.
+
+IAP Desktop tunnels RDP connections over IAP-TCP forwarding, which is incompatible with Kerberos. IAP Desktop therefore
+uses NTLM to perform network-level authentication (NLA) to the remote Windows VM.
+
+To mitigate this issue, review the group policy settings configured under 
+**Computer Configuration > Windows Settings > Security Settings > Local Policies > Security Options**.
+
+*   If **Network Security: Restrict NTLM: Outgoing NTLM traffic to remote servers** is set to **Deny all**, you can
+    mitigate the issue by setting **Network Security: Restrict NTLM: Add remote server exceptions for NTLM authentication**
+    to `localhost,127.0.0.1`.
+
+    Configure this exception in a group policy that applies to the workstation (not the VM). 
+
+* If **Network Security: Restrict NTLM: NTLM authentication in this domain** is set to any **Deny** value, then
+    you can't use RDP over IAP-TCP forwarding. 
+
+    If you've set up Cloud VPN or Interconnect, you might be able to connect directly by changing 
+    your [connection settings](toolwindow-connection-settings) to **Connect via: VPN/Interconnect**.
 
 ## Other errors
 
